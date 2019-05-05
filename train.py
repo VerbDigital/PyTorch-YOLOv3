@@ -22,6 +22,38 @@ from torchvision import transforms
 from torch.autograd import Variable
 import torch.optim as optim
 
+class FlowModel(nn.Module):
+
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+        self.conv = SimpleCNN()
+        self.yolo_layers = self.model.yolo_layers
+        self.seen = self.model.seen
+
+    def forward(self, x, *targets):
+        image, flow = x
+        flowimage = torch.cat((image, flow), dim=1)
+        gate = self.conv(flowimage)
+        image = image * gate
+        return self.model(image, *targets)
+
+
+class SimpleCNN(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Conv2d(4, 36, kernel_size=5, stride=1, padding=2)
+        self.relu = nn.ReLU()
+        self.conv2 = nn.Conv2d(36, 3, kernel_size=5, stride=1, padding=2)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        x1 = self.relu(self.conv1(x))
+        y = self.sigmoid(self.conv2(x1))
+        return y
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type=int, default=100, help="number of epochs")
@@ -36,6 +68,7 @@ if __name__ == "__main__":
     parser.add_argument("--evaluation_interval", type=int, default=1, help="interval evaluations on validation set")
     parser.add_argument("--compute_map", default=False, help="if True computes mAP every tenth batch")
     parser.add_argument("--multiscale_training", default=True, help="allow for multi-scale training")
+    parser.add_argument("--flow", nargs="?", const=True)
     opt = parser.parse_args()
     print(opt)
 
@@ -64,7 +97,17 @@ if __name__ == "__main__":
             model.load_darknet_weights(opt.pretrained_weights)
 
     # Get dataloader
-    dataset = ListDataset(train_path, augment=True, multiscale=opt.multiscale_training)
+    if opt.flow:
+        dataset = ListFlowDataset(train_path, augment=True, multiscale=opt.multiscale_training,
+                          return_flow=(opt.flow == 'cnn'))
+        if opt.flow == 'cnn':
+            model = FlowModel(model)
+            model = model.to(device)
+
+    else:
+        dataset = ListDataset(train_path, augment=True, multiscale=opt.multiscale_training,
+                          # more_augment=True
+                          )
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=opt.batch_size,
@@ -99,7 +142,10 @@ if __name__ == "__main__":
         for batch_i, (_, imgs, targets) in enumerate(dataloader):
             batches_done = len(dataloader) * epoch + batch_i
 
-            imgs = Variable(imgs.to(device))
+            if isinstance(imgs, (tuple, list)):
+                imgs = (Variable(imgs[0].to(device)), Variable(imgs[1].to(device)))
+            else:
+                imgs = Variable(imgs.to(device))
             targets = Variable(targets.to(device), requires_grad=False)
 
             loss, outputs = model(imgs, targets)
@@ -144,8 +190,10 @@ if __name__ == "__main__":
             log_str += f"\n---- ETA {time_left}"
 
             print(log_str)
-
-            model.seen += imgs.size(0)
+            if opt.flow == 'cnn':
+                model.seen += imgs[0].size(0)
+            else:
+                model.seen += imgs.size(0)
 
         if epoch % opt.evaluation_interval == 0:
             print("\n---- Evaluating Model ----")
@@ -158,6 +206,7 @@ if __name__ == "__main__":
                 nms_thres=0.5,
                 img_size=opt.img_size,
                 batch_size=8,
+                opt=opt
             )
             evaluation_metrics = [
                 ("val_precision", precision.mean()),

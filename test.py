@@ -20,11 +20,15 @@ from torch.autograd import Variable
 import torch.optim as optim
 
 
-def evaluate(model, path, iou_thres, conf_thres, nms_thres, img_size, batch_size):
+def evaluate(model, path, iou_thres, conf_thres, nms_thres, img_size, batch_size, opt):
     model.eval()
 
     # Get dataloader
-    dataset = ListDataset(path, img_size=img_size, augment=False, multiscale=False)
+    if opt.flow:
+        dataset = ListFlowDataset(path, img_size=img_size, augment=False, multiscale=False,
+                          return_flow=(opt.flow == 'cnn'))
+    else:
+        dataset = ListDataset(path, img_size=img_size, augment=False, multiscale=False)
     dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size, shuffle=False, num_workers=1, collate_fn=dataset.collate_fn
     )
@@ -41,7 +45,13 @@ def evaluate(model, path, iou_thres, conf_thres, nms_thres, img_size, batch_size
         targets[:, 2:] = xywh2xyxy(targets[:, 2:])
         targets[:, 2:] *= img_size
 
-        imgs = Variable(imgs.type(Tensor), requires_grad=False)
+        if isinstance(imgs, (list, tuple)):
+            imgs = (
+                    Variable(imgs[0].type(Tensor), requires_grad=False),
+                    Variable(imgs[1].type(Tensor), requires_grad=False)
+                    )
+        else:
+            imgs = Variable(imgs.type(Tensor), requires_grad=False)
 
         with torch.no_grad():
             outputs = model(imgs)

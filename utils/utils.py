@@ -59,6 +59,26 @@ def xywh2xyxy(x):
     return y
 
 
+def xyxy2xyminwh(x):
+    # WARNING!!!: not the inverse of the above function. This returns
+    # opencv xywh format, which is (x_min, y_min, w, h). The above has x_center, y_center.
+    y = x.new(x.shape)
+    y[..., 0] = x[..., 0]
+    y[..., 1] = x[..., 1]
+    y[..., 2] = x[..., 2] - x[..., 0]
+    y[..., 3] = x[..., 3] - x[..., 1]
+    return y
+
+
+def xyminwh2xywh(x):
+    y = x.new(x.shape)
+    y[..., 0] = x[..., 0] + x[..., 2] / 2
+    y[..., 1] = x[..., 1] + x[..., 3] / 2
+    y[..., 2] = x[..., 2]
+    y[..., 3] = x[..., 3]
+    return y
+
+
 def ap_per_class(tp, conf, pred_cls, target_cls):
     """ Compute the average precision, given the recall and precision curves.
     Source: https://github.com/rafaelpadilla/Object-Detection-Metrics.
@@ -223,7 +243,7 @@ def bbox_iou(box1, box2, x1y1x2y2=True):
     return iou
 
 
-def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.4):
+def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.4, initial_format='xywh'):
     """
     Removes detections with lower object confidence score than 'conf_thres' and performs
     Non-Maximum Suppression to further filter detections.
@@ -232,7 +252,14 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.4):
     """
 
     # From (center x, center y, width, height) to (x1, y1, x2, y2)
-    prediction[..., :4] = xywh2xyxy(prediction[..., :4])
+    prediction = prediction.clone()
+    if initial_format == 'xyminwh':
+        prediction[..., :4] = xyminwh2xywh(prediction[..., :4])
+    if initial_format in ['xywh', 'xyminwh']:
+        prediction[..., :4] = xywh2xyxy(prediction[..., :4])
+    if prediction.shape[-1] == 5:
+        # fake cls data
+        prediction = torch.cat((prediction, torch.ones_like(prediction[..., 4]).unsqueeze(-1)), -1)
     output = [None for _ in range(len(prediction))]
     for image_i, image_pred in enumerate(prediction):
         # Filter out confidence scores below threshold
@@ -284,6 +311,9 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
     tw = FloatTensor(nB, nA, nG, nG).fill_(0)
     th = FloatTensor(nB, nA, nG, nG).fill_(0)
     tcls = FloatTensor(nB, nA, nG, nG, nC).fill_(0)
+
+    if not target.numel():
+        return iou_scores, class_mask, obj_mask, noobj_mask, tx, ty, tw, th, tcls, obj_mask.float()
 
     # Convert to position relative to box
     target_boxes = target[:, 2:6] * nG

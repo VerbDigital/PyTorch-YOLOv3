@@ -6,8 +6,12 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import numpy as np
 
-from utils.parse_config import *
-from utils.utils import build_targets, to_cpu, non_max_suppression
+try:
+    from yolov3.utils.parse_config import *
+    from yolov3.utils.utils import build_targets, to_cpu, non_max_suppression
+except:
+    from utils.parse_config import *
+    from utils.utils import build_targets, to_cpu, non_max_suppression
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches

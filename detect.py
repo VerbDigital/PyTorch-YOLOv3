@@ -109,6 +109,7 @@ if __name__ == "__main__":
             detections = rescale_boxes(detections, opt.img_size, img.shape[:2])
             unique_labels = detections[:, -1].cpu().unique()
             n_cls_preds = len(unique_labels)
+            random.seed(1)
             bbox_colors = random.sample(colors, n_cls_preds)
             for x1, y1, x2, y2, conf, cls_conf, cls_pred in detections:
 
@@ -131,6 +132,7 @@ if __name__ == "__main__":
                     verticalalignment="top",
                     bbox={"color": color, "pad": 0},
                 )
+                x = 1
 
         # Save generated image with detections
         plt.axis("off")
